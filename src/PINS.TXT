@@ -1,0 +1,28 @@
+MOTOR R = 23
+MOTOR L = 22
+
+ENCODER L 18
+ENCODER R 19
+
+LIMIT UP   25
+LIMIT DOWN 33
+
+
+gpio
+4
+13
+14
+18
+19
+21
+22
+23
+25
+26
+27
+32
+33
+
+input only
+34
+35
