@@ -1,6 +1,6 @@
-#define DEBUG 1
+#define DEBUG             1
 
-#define BAUDRATE 115200
+#define BAUDRATE          115200
 
 #define HOMING_SPEED      50
 #define MAX_MOVING_SPEED  255
@@ -47,18 +47,20 @@ BluetoothSerial SerialBT;
 TaskHandle_t Task1;
 TaskHandle_t Task2;
 
-bool homingStatus = false;
+bool  currentState;
+bool  lastState;
 
-bool currentState;
-bool lastState;
+bool  homingStatus     = 0;
+bool  moveUpStatus     = 0;
+bool  moveDownStatus   = 0;
 
-uint32_t position = 0;
+uint32_t  position     = 0;
 
-uint32_t encoder_l_counter = 0;
-uint32_t encoder_r_counter = 0;
+uint32_t  encoder_l_counter  = 0;
+uint32_t  encoder_r_counter  = 0;
 
-uint32_t targetPosition = 0;
-uint8_t  movingSpeed = 0;
+uint32_t  targetPosition     = 0;
+uint8_t   movingSpeed        = 0;
 
 void readEncoder() { 
   currentState = digitalRead(ENCODER_L_PIN);
@@ -134,6 +136,7 @@ void processData(char data){
   if (data == 'D'){ targetPosition = TRAY_4_POSITION; }
   if (data == 'E'){ targetPosition = TRAY_5_POSITION; }
   if (data == 'F'){ targetPosition = TRAY_6_POSITION; }
+  if (data == 'Z'){ targetPosition = PICKUP_POSITION; }
 }
 
 void readSerialBT(){
@@ -163,6 +166,23 @@ void liftHoming() {
   if (DEBUG) {Serial.println("Offset Setting Completed!!");}
   delay(1000);
   position = 0;
+}
+
+void limitCheck () {
+  if (UP_LIMIT_DETECT) {
+    analogWrite(MOTOR_UP_PIN, 0);
+    homingStatus = 0;
+    movingSpeed = 0;
+    liftHoming();
+  }
+  if (DOWN_LIMIT_DETECT) {
+    analogWrite(MOTOR_DOWN_PIN, 0);
+    delay (1000);
+    analogWrite(MOTOR_UP_PIN, HOMING_SPEED);
+    delay (3000);
+    movingSpeed = 0;
+    liftHoming();
+  }
 }
 
 void io_init(){
@@ -205,5 +225,8 @@ void setup() {
 void loop() {
   readSerial2();
   readSerialBT();
+  if (moveUpStatus)   { moveUp();   }
+  if (moveDownStatus) { moveDown(); }
+  limitCheck();
   // debugIO();
 }
