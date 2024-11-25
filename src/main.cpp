@@ -21,6 +21,7 @@
 #define LIMIT_DOWN        33
 
 #define SENSITIVITY       1
+#define EEPROM_SIZE       10
 
 #define DELAY_TIME_IN_ms  1
 
@@ -42,11 +43,14 @@
 
 #include <Arduino.h>
 #include "BluetoothSerial.h"
+#include <EEPROM.h>
 
 BluetoothSerial SerialBT;
 
 TaskHandle_t Task1;
 TaskHandle_t Task2;
+
+int trayPosition [5]= { 0, 0, 0, 0, 0};
 
 bool  currentState;
 bool  lastState;
@@ -89,35 +93,46 @@ void debugIO() {
   Serial.println("UP: " + String(digitalRead(LIMIT_UP)) + " DOWN: " + String(digitalRead(LIMIT_DOWN)));
 }
 
-void processData(char data){
-  if (data == 'A'){ targetPosition = TRAY_1_POSITION; moveUpStatus   = 1; }
-  if (data == 'B'){ targetPosition = TRAY_2_POSITION; moveUpStatus   = 1; }
-  if (data == 'C'){ targetPosition = TRAY_3_POSITION; moveUpStatus   = 1; }
-  if (data == 'D'){ targetPosition = TRAY_4_POSITION; moveUpStatus   = 1; }
-  if (data == 'E'){ targetPosition = TRAY_5_POSITION; moveUpStatus   = 1; }
-  if (data == 'F'){ targetPosition = TRAY_6_POSITION; moveUpStatus   = 1; }
-  if (data == 'Z'){ targetPosition = PICKUP_POSITION; moveDownStatus = 1; }
+void processData(String data){
+  if (data == "A"){ targetPosition = trayPosition[0]; moveUpStatus   = 1; }
+  if (data == "B"){ targetPosition = trayPosition[1]; moveUpStatus   = 1; }
+  if (data == "C"){ targetPosition = trayPosition[2]; moveUpStatus   = 1; }
+  if (data == "D"){ targetPosition = trayPosition[3]; moveUpStatus   = 1; }
+  if (data == "E"){ targetPosition = trayPosition[4]; moveUpStatus   = 1; }
+  if (data == "Z"){ targetPosition = PICKUP_POSITION; moveDownStatus = 1; }
 }
 
 void processMasterData(String data){
   if (data.startsWith("*") && data.endsWith("#")){
     char traySelect = data.charAt(1);
-    if (traySelect == 'A'){ targetPosition = TRAY_1_POSITION; moveUpStatus   = 1; }
-    if (traySelect == 'B'){ targetPosition = TRAY_2_POSITION; moveUpStatus   = 1; }
-    if (traySelect == 'C'){ targetPosition = TRAY_3_POSITION; moveUpStatus   = 1; }
-    if (traySelect == 'D'){ targetPosition = TRAY_4_POSITION; moveUpStatus   = 1; }
-    if (traySelect == 'E'){ targetPosition = TRAY_5_POSITION; moveUpStatus   = 1; }
-    if (traySelect == 'F'){ targetPosition = TRAY_6_POSITION; moveUpStatus   = 1; }
+    if (traySelect == 'A'){ targetPosition = trayPosition[0]; moveUpStatus   = 1; }
+    if (traySelect == 'B'){ targetPosition = trayPosition[1]; moveUpStatus   = 1; }
+    if (traySelect == 'C'){ targetPosition = trayPosition[2]; moveUpStatus   = 1; }
+    if (traySelect == 'D'){ targetPosition = trayPosition[3]; moveUpStatus   = 1; }
+    if (traySelect == 'E'){ targetPosition = trayPosition[4]; moveUpStatus   = 1; }
   } else if (data.startsWith("%") && data.endsWith("#")){
     char liftDown = data.charAt(1);
     if (liftDown == 'Z'){ targetPosition = PICKUP_POSITION; moveDownStatus = 1; }
   }
 }             
+
+void liftPostionSet(String data){
+  char charTray = data.charAt(0);
+  uint8_t tray = charTray - 'A';
+  uint8_t pos  = data.substring(1, data.length()).toInt();
+  if (DEBUG) {SerialBT.println("Tray: " + String(tray) + " Position: " + String(pos));}
+  EEPROM.write(tray, pos);
+  EEPROM.commit();
+  trayPosition[tray] = pos*10;
+  if (DEBUG) { SerialBT.println("Tray: " + String(tray) + "\t POS: " + String(trayPosition[tray]));}
+}
 void readSerialBT(){
   if (SerialBT.available()) {
-    char incoming = SerialBT.read();
+    String incoming = SerialBT.readStringUntil('\n');
+    incoming.trim();
+    if (incoming.startsWith("L")){ liftPostionSet(incoming.substring(1, incoming.length()));}
+    else { processData(incoming); }
     SerialBT.print(incoming);
-    processData(incoming);  
   }
 }
 
@@ -145,7 +160,7 @@ void liftHoming() {
   analogWrite(MOTOR_UP_PIN,   HOMING_SPEED);
   while (!homingStatus) {
     readEncoder();
-    if (position == HOMING_OFFSET) { analogWrite(MOTOR_UP_PIN, 0); homingStatus = true; }
+    if (position >= HOMING_OFFSET) { analogWrite(MOTOR_UP_PIN, 0); homingStatus = true; }
     yield();
   }
   analogWrite(MOTOR_UP_PIN, 0);
@@ -157,10 +172,16 @@ void liftHoming() {
 void limitCheck () {
   if (position > TRAY_1_POSITION + 1000){ analogWrite(MOTOR_DOWN_PIN, 0); analogWrite(MOTOR_UP_PIN, 0); position = 0; } 
   if (UP_LIMIT_DETECT) {
+    feedbackData = "";
+    Serial2.println("*ERROR#");
+    delay(100);
     analogWrite(MOTOR_UP_PIN, 0);
+    moveUpStatus = 0;
+    moveDownStatus = 0;
     homingStatus = 0;
     movingSpeed = 0;
     liftHoming();
+    
   }
   if (DOWN_LIMIT_DETECT) {
     analogWrite(MOTOR_DOWN_PIN, 0);
@@ -182,7 +203,7 @@ void moveUp() {
       analogWrite(MOTOR_DOWN_PIN, 0);
       if (movingSpeed > HOMING_SPEED) { movingSpeed--; }
     }
-  } if (position == targetPosition || UP_LIMIT_DETECT) {
+  } if (position >= targetPosition) {
     analogWrite(MOTOR_UP_PIN, 0);
     analogWrite(MOTOR_DOWN_PIN, 0);
     moveUpStatus = 0;
@@ -205,7 +226,7 @@ void moveDown() {
     moveDownStatus = 0;
     homingStatus = 0;
     liftHoming();
-    delay(1000);
+    delay(500);
     Serial2.println("$X#");
     position = 0;
   }
@@ -220,10 +241,18 @@ void io_init(){
 
   analogWrite(MOTOR_DOWN_PIN, 0);
   analogWrite(MOTOR_UP_PIN,   0);
+
+  trayPosition[0] = EEPROM.read(0)*10;
+  trayPosition[1] = EEPROM.read(1)*10;
+  trayPosition[2] = EEPROM.read(2)*10;
+  trayPosition[3] = EEPROM.read(3)*10;
+  trayPosition[4] = EEPROM.read(4)*10;
 }
 
 
 void coreZeroLoop() {
+  readSerial2();
+  readSerialBT();
   if (moveUpStatus)   { moveUp();   }
   if (moveDownStatus) { moveDown(); }
   limitCheck();
@@ -244,17 +273,16 @@ void dualCoreSetup()
 }
 
 void setup() {
+  EEPROM.begin(EEPROM_SIZE);
   io_init();
   Serial.begin(9600);
   Serial2.begin(BAUDRATE);
-  SerialBT.begin("VENDING_L1_TEST"); //Bluetooth device name
+  SerialBT.begin("VENDING_L1"); //Bluetooth device name
   dualCoreSetup();
   liftHoming();
 }
 
 void loop() {
-  readSerial2();
-  readSerialBT();
   readEncoder();
   // debugIO();
 }
